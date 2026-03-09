@@ -4,6 +4,22 @@
 
 set -euo pipefail
 
+# Load env vars from shell config if not already set
+if [ -z "${COSENSE_SID:-}" ] || [ -z "${COSENSE_PROJECT:-}" ]; then
+  for rc in "$HOME/.zshenv" "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
+    [ -f "$rc" ] && source "$rc" 2>/dev/null || true
+  done
+fi
+
+if [ -z "${COSENSE_SID:-}" ]; then
+  echo "Error: COSENSE_SID is not set. Export it in ~/.zshrc or ~/.zshenv" >&2
+  exit 1
+fi
+if [ -z "${COSENSE_PROJECT:-}" ]; then
+  echo "Error: COSENSE_PROJECT is not set. Export it in ~/.zshrc or ~/.zshenv" >&2
+  exit 1
+fi
+
 BASE_URL="https://scrapbox.io"
 COOKIE_HEADER="Cookie: connect.sid=${COSENSE_SID}"
 BACKUP_DIR="${COSENSE_BACKUP_DIR:-/tmp/cosense_backups}"

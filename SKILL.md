@@ -12,6 +12,8 @@ description: "Cosense（旧Scrapbox）のページ読み取り・検索・新規
 - `COSENSE_PROJECT` — 操作対象のプロジェクト名
 - `COSENSE_BACKUP_DIR`（任意） — バックアップ保存先（デフォルト: `/tmp/cosense_backups`）
 
+**注意**: Claude Codeのシェル環境では `~/.zshrc` の `export` が反映されない場合がある。スクリプトは未設定時に `~/.zshenv` → `~/.zshrc` → `~/.bashrc` の順で自動読み込みを試みるが、確実にするには `~/.zshenv` に記述するのを推奨。
+
 ## データ安全ルール（必ず遵守）
 
 1. **書き込み前に必ずユーザーに確認する** — import/safe-importを実行する前に、変更内容をユーザーに提示し、明示的な承認を得る
