@@ -5,8 +5,42 @@
 set -euo pipefail
 
 BASE_URL="https://scrapbox.io"
-COOKIE="connect.sid=${COSENSE_SID}"
+COOKIE_HEADER="Cookie: connect.sid=${COSENSE_SID}"
 BACKUP_DIR="${COSENSE_BACKUP_DIR:-/tmp/cosense_backups}"
+
+# --- Helper functions ---
+
+get_csrf_token() {
+  curl -s -H "$COOKIE_HEADER" "${BASE_URL}/api/users/me" | \
+    python3 -c "import sys,json; print(json.load(sys.stdin).get('csrfToken',''))"
+}
+
+do_import() {
+  local IMPORT_JSON="$1"
+  local TOKEN
+  TOKEN=$(get_csrf_token)
+
+  if [ -z "$TOKEN" ]; then
+    echo "Error: Could not obtain CSRF token" >&2
+    exit 1
+  fi
+
+  local TMPFILE
+  TMPFILE=$(mktemp /tmp/cosense_import_XXXXXX.json)
+  echo "$IMPORT_JSON" > "$TMPFILE"
+
+  curl -s -H "$COOKIE_HEADER" \
+    -H "Accept: application/json, text/plain, */*" \
+    -H "X-CSRF-TOKEN: ${TOKEN}" \
+    -X POST \
+    -F "import-file=@${TMPFILE};type=application/json" \
+    -F "name=undefined" \
+    "${BASE_URL}/api/page-data/import/${COSENSE_PROJECT}.json"
+
+  rm -f "$TMPFILE"
+}
+
+# --- Commands ---
 
 case "${1:-}" in
   backup)
@@ -18,7 +52,7 @@ case "${1:-}" in
     TIMESTAMP=$(date +%Y%m%d_%H%M%S)
     SAFE_NAME=$(echo "$TITLE" | sed 's/[^a-zA-Z0-9_-]/_/g')
     BACKUP_FILE="${BACKUP_DIR}/${COSENSE_PROJECT}_${SAFE_NAME}_${TIMESTAMP}.json"
-    RESPONSE=$(curl -s -b "$COOKIE" "${BASE_URL}/api/pages/${COSENSE_PROJECT}/${ENCODED}")
+    RESPONSE=$(curl -s -H "$COOKIE_HEADER" "${BASE_URL}/api/pages/${COSENSE_PROJECT}/${ENCODED}")
 
     # Verify page was retrieved successfully
     if echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); assert 'lines' in d" 2>/dev/null; then
@@ -44,11 +78,10 @@ for page in data.get('pages', []):
     print(page.get('title', ''))
 ")
 
-    BACKUP_FAILED=0
     while IFS= read -r title; do
       [ -z "$title" ] && continue
       ENCODED=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$title', safe=''))")
-      RESPONSE=$(curl -s -b "$COOKIE" "${BASE_URL}/api/pages/${COSENSE_PROJECT}/${ENCODED}")
+      RESPONSE=$(curl -s -H "$COOKIE_HEADER" "${BASE_URL}/api/pages/${COSENSE_PROJECT}/${ENCODED}")
 
       # Check if page exists (has lines = existing page)
       if echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); assert 'lines' in d and len(d['lines'])>0" 2>/dev/null; then
@@ -64,20 +97,7 @@ for page in data.get('pages', []):
     done <<< "$TITLES"
 
     # Proceed with import
-    CSRF=$(curl -s -b "$COOKIE" "${BASE_URL}/api/csrf-token")
-    TOKEN=$(echo "$CSRF" | python3 -c "import sys,json; print(json.load(sys.stdin).get('csrfToken',''))" 2>/dev/null || echo "")
-
-    if [ -z "$TOKEN" ]; then
-      echo "Error: Could not obtain CSRF token" >&2
-      exit 1
-    fi
-
-    curl -s -b "$COOKIE" \
-      -H "Content-Type: application/json;charset=utf-8" \
-      -H "X-CSRF-TOKEN: ${TOKEN}" \
-      -X POST \
-      -d "$IMPORT_JSON" \
-      "${BASE_URL}/api/page-data/import/${COSENSE_PROJECT}.json"
+    do_import "$IMPORT_JSON"
     ;;
 
   restore)
@@ -99,21 +119,7 @@ lines = [line['text'] for line in data.get('lines', [])]
 print(json.dumps({'pages': [{'title': title, 'lines': lines}]}, ensure_ascii=False))
 ")
 
-    CSRF=$(curl -s -b "$COOKIE" "${BASE_URL}/api/csrf-token")
-    TOKEN=$(echo "$CSRF" | python3 -c "import sys,json; print(json.load(sys.stdin).get('csrfToken',''))" 2>/dev/null || echo "")
-
-    if [ -z "$TOKEN" ]; then
-      echo "Error: Could not obtain CSRF token" >&2
-      exit 1
-    fi
-
-    curl -s -b "$COOKIE" \
-      -H "Content-Type: application/json;charset=utf-8" \
-      -H "X-CSRF-TOKEN: ${TOKEN}" \
-      -X POST \
-      -d "$RESTORE_JSON" \
-      "${BASE_URL}/api/page-data/import/${COSENSE_PROJECT}.json"
-
+    do_import "$RESTORE_JSON"
     echo "Restored page from: ${BACKUP_FILE}"
     ;;
 
@@ -125,16 +131,17 @@ print(json.dumps({'pages': [{'title': title, 'lines': lines}]}, ensure_ascii=Fal
       echo "No backup directory found"
     fi
     ;;
+
   get-page)
     # Usage: cosense_api.sh get-page "Page Title"
     TITLE=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$2', safe=''))")
-    curl -s -b "$COOKIE" "${BASE_URL}/api/pages/${COSENSE_PROJECT}/${TITLE}"
+    curl -s -H "$COOKIE_HEADER" "${BASE_URL}/api/pages/${COSENSE_PROJECT}/${TITLE}"
     ;;
 
   get-page-text)
     # Usage: cosense_api.sh get-page-text "Page Title"
     TITLE=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$2', safe=''))")
-    curl -s -b "$COOKIE" "${BASE_URL}/api/pages/${COSENSE_PROJECT}/${TITLE}/text"
+    curl -s -H "$COOKIE_HEADER" "${BASE_URL}/api/pages/${COSENSE_PROJECT}/${TITLE}/text"
     ;;
 
   list-pages)
@@ -142,40 +149,23 @@ print(json.dumps({'pages': [{'title': title, 'lines': lines}]}, ensure_ascii=Fal
     LIMIT="${2:-100}"
     SKIP="${3:-0}"
     SORT="${4:-updated}"
-    curl -s -b "$COOKIE" "${BASE_URL}/api/pages/${COSENSE_PROJECT}?limit=${LIMIT}&skip=${SKIP}&sort=${SORT}"
+    curl -s -H "$COOKIE_HEADER" "${BASE_URL}/api/pages/${COSENSE_PROJECT}?limit=${LIMIT}&skip=${SKIP}&sort=${SORT}"
     ;;
 
   search)
     # Usage: cosense_api.sh search "query"
     QUERY=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$2', safe=''))")
-    curl -s -b "$COOKIE" "${BASE_URL}/api/pages/${COSENSE_PROJECT}/search/query?q=${QUERY}"
+    curl -s -H "$COOKIE_HEADER" "${BASE_URL}/api/pages/${COSENSE_PROJECT}/search/query?q=${QUERY}"
     ;;
 
   csrf-token)
     # Usage: cosense_api.sh csrf-token
-    curl -s -b "$COOKIE" "${BASE_URL}/api/csrf-token" -c - | grep -oP '(?<="csrfToken":")[^"]*' || \
-    curl -s -b "$COOKIE" -X GET "${BASE_URL}/api/pages/${COSENSE_PROJECT}" -D - 2>/dev/null | grep -i 'x-csrf-token' | awk '{print $2}' || true
+    get_csrf_token
     ;;
 
   import)
     # Usage: cosense_api.sh import '{"pages":[...]}'
-    # Step 1: Get CSRF token
-    CSRF=$(curl -s -b "$COOKIE" "${BASE_URL}/api/csrf-token")
-    # The response format may vary; extract token
-    TOKEN=$(echo "$CSRF" | python3 -c "import sys,json; print(json.load(sys.stdin).get('csrfToken',''))" 2>/dev/null || echo "")
-
-    if [ -z "$TOKEN" ]; then
-      echo "Error: Could not obtain CSRF token" >&2
-      exit 1
-    fi
-
-    # Step 2: Import pages
-    curl -s -b "$COOKIE" \
-      -H "Content-Type: application/json;charset=utf-8" \
-      -H "X-CSRF-TOKEN: ${TOKEN}" \
-      -X POST \
-      -d "$2" \
-      "${BASE_URL}/api/page-data/import/${COSENSE_PROJECT}.json"
+    do_import "$2"
     ;;
 
   *)

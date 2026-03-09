@@ -48,17 +48,25 @@ GET /api/page-data/export/:project.json
 
 ### Get CSRF Token (required before writes)
 ```
-GET /api/csrf-token
+GET /api/users/me
 ```
-Returns `{ csrfToken: "..." }`. Send as `X-CSRF-TOKEN` header.
+Response includes `csrfToken` field: `{ "name": "...", "csrfToken": "...", ... }`. Send as `X-CSRF-TOKEN` header.
+
+Note: `/api/csrf-token` はHTMLを返すため使用不可。`/api/users/me` から取得する。
 
 ### Import (Create/Update Pages)
 ```
 POST /api/page-data/import/:project.json
 ```
-Headers: `Content-Type: application/json`, `X-CSRF-TOKEN: <token>`
 
-Body:
+**送信形式: `multipart/form-data`**（`application/json` ではない）
+
+| フィールド | 値 |
+|-----------|---|
+| `import-file` | JSONファイル（`type=application/json`） |
+| `name` | `undefined` |
+
+JSONファイルの内容:
 ```json
 {
   "pages": [
@@ -68,6 +76,16 @@ Body:
     }
   ]
 }
+```
+
+curlでの送信例:
+```bash
+curl -H "Cookie: connect.sid=..." \
+  -H "X-CSRF-TOKEN: <token>" \
+  -X POST \
+  -F "import-file=@data.json;type=application/json" \
+  -F "name=undefined" \
+  "https://scrapbox.io/api/page-data/import/PROJECT.json"
 ```
 
 - First element of `lines` should match `title`
